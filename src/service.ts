@@ -61,26 +61,19 @@ export function isRetriableError(error: string | undefined): boolean {
 // --- Reset Time Calculation ---
 
 export function nextResetTime(now: Date, windowHours: number): number {
+  if (!windowHours || windowHours <= 0) windowHours = 5;
+
   const currentHour = now.getUTCHours();
-  const currentMinute = now.getUTCMinutes();
-  const currentSecond = now.getUTCSeconds();
-
-  let nextBoundary = currentHour + windowHours - (currentHour % windowHours);
-
-  // If exactly on boundary, push to next window
-  if (currentHour % windowHours === 0 && currentMinute === 0 && currentSecond === 0) {
-    nextBoundary = currentHour + windowHours;
-  }
+  const nextBoundary = currentHour + windowHours - (currentHour % windowHours);
 
   const result = new Date(now);
-  result.setUTCSeconds(0, 0);
 
   if (nextBoundary >= 24) {
     // Overflows to next day
     result.setUTCDate(result.getUTCDate() + 1);
-    result.setUTCHours(nextBoundary - 24, 1, 0, 0); // +1 minute margin
+    result.setUTCHours(Math.floor(nextBoundary - 24), 1, 0, 0); // +1 minute margin
   } else {
-    result.setUTCHours(nextBoundary, 1, 0, 0); // +1 minute margin
+    result.setUTCHours(Math.floor(nextBoundary), 1, 0, 0); // +1 minute margin
   }
 
   return result.getTime();

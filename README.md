@@ -26,9 +26,10 @@ agent_end hook fires
                     |-- Budget window not reset? --> wait
                     |-- Budget window reset?     --> chat.send to session
                                                        |
-                                                       |--> Success: remove from queue
-                                                       |--> 429 again: agent_end fires
-                                                            --> re-queued automatically
+                                                       |--> Ack received: wait for result
+                                                       |     |--> agent_end success: remove from queue
+                                                       |     |--> agent_end 429: re-queued automatically
+                                                       |--> Send failed: wait for next window
 ```
 
 The retry uses `chat.send` with the original `sessionKey`, which means the gateway loads the complete JSONL transcript and the agent resumes with full context. This is equivalent to the user typing a message in the chat.
