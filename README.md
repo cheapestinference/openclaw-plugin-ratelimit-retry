@@ -1,4 +1,4 @@
-# retry-on-error
+# ratelimit-retry
 
 An OpenClaw plugin that automatically retries agent conversations killed by provider rate limits.
 
@@ -9,6 +9,39 @@ When your LLM provider hits a rate limit or budget cap (HTTP 429), every running
 ## Solution
 
 This plugin hooks into OpenClaw's `agent_end` event, detects retriable errors (429s, rate limits, budget exhaustion), and parks the failed session in a persistent queue on disk. A background service waits for the provider's budget window to reset, then sends `chat.send` to the original session -- resuming the conversation with its full transcript context, as if the user had typed a message.
+
+## Installation
+
+```bash
+openclaw plugins install @cheapestinference/openclaw-ratelimit-retry
+```
+
+Or copy manually to your extensions directory:
+
+```bash
+cp -r openclaw-plugin-ratelimit-retry ~/.openclaw/extensions/ratelimit-retry
+```
+
+Enable it in OpenClaw config:
+
+```bash
+openclaw config set plugins.ratelimit-retry.budgetWindowHours 5
+openclaw config set plugins.ratelimit-retry.maxRetryAttempts 3
+```
+
+No `npm install` needed. The plugin has zero runtime dependencies.
+
+### Complete example
+
+```yaml
+# ~/.openclaw/config.yaml
+plugins:
+  ratelimit-retry:
+    budgetWindowHours: 5
+    maxRetryAttempts: 3
+    checkIntervalMinutes: 5
+    retryMessage: "Continue where you left off. The previous attempt failed due to a rate limit that has now reset."
+```
 
 ## How It Works
 
@@ -36,35 +69,6 @@ The retry uses `chat.send` with the original `sessionKey`, which means the gatew
 
 The model is **fire-and-forget with re-detection**: `chat.send` returns an immediate ack (`{ ok, runId, status: "started" }`), not the final result. If the retried run fails again with a 429, the `agent_end` hook fires again and the session is re-queued with an incremented attempt counter. This loop continues until the retry succeeds or `maxRetryAttempts` is reached.
 
-## Installation
-
-Copy the plugin to your OpenClaw extensions directory:
-
-```bash
-cp -r openclaw-plugin-retry-on-error ~/.openclaw/extensions/retry-on-error
-```
-
-Enable it in OpenClaw config:
-
-```bash
-openclaw config set plugins.retry-on-error.budgetWindowHours 5
-openclaw config set plugins.retry-on-error.maxRetryAttempts 3
-```
-
-No `npm install` needed. The plugin has zero runtime dependencies.
-
-### Complete example
-
-```yaml
-# ~/.openclaw/config.yaml
-plugins:
-  retry-on-error:
-    budgetWindowHours: 5
-    maxRetryAttempts: 3
-    checkIntervalMinutes: 5
-    retryMessage: "Continue where you left off. The previous attempt failed due to a rate limit that has now reset."
-```
-
 ## Configuration
 
 | Option | Type | Default | Description |
@@ -76,7 +80,7 @@ plugins:
 
 ## How the Retry Timing Works
 
-LiteLLM (used by CheapestInference and other providers) resets budget counters on fixed UTC-aligned windows. With a 5-hour window, the boundaries are:
+Many LLM providers (including LiteLLM) reset budget counters on fixed UTC-aligned windows. With a 5-hour window, the boundaries are:
 
 ```
 00:00  05:00  10:00  15:00  20:00  (next day) 00:00
@@ -107,15 +111,16 @@ Non-retriable patterns are checked first. If an error matches a non-retriable pa
 
 | Pattern | Reason |
 |---------|--------|
-| `401`, `403`, `invalid api key`, `unauthorized` | Auth errors -- fix your credentials |
+| `401`, `402`, `403`, `404` | HTTP client errors -- won't succeed on retry |
+| `invalid api key`, `unauthorized` | Auth errors -- fix your credentials |
 | `invalid request`, `malformed` | Bad request format -- won't succeed on retry |
-| `404`, `model not found` | Model doesn't exist |
+| `model not found` | Model doesn't exist |
 | `context length`, `prompt too large` | Context overflow -- message is too long |
-| `402`, `insufficient credits` | Billing issue -- requires user action |
+| `insufficient credits` | Billing issue -- requires user action |
 
 ## Edge Cases
 
-- **Server restarts**: the queue is persisted to `{stateDir}/retry-on-error/queue.json` (typically `~/.openclaw/retry-on-error/queue.json`) and reloaded on startup.
+- **Server restarts**: the queue is persisted to `{stateDir}/ratelimit-retry/queue.json` and reloaded on startup.
 - **Same session errors multiple times**: deduplicated by `sessionKey`. The existing entry is updated with incremented attempts and a recalculated `retryAfter`.
 - **Retry fails with 429 again**: `agent_end` fires again, re-queuing with incremented attempts. Natural loop until success or `maxRetryAttempts`.
 - **Gateway unreachable during retry**: connection error is caught, entry's `retryAfter` is pushed to the next budget window to avoid hammering a down gateway every tick.
@@ -124,7 +129,7 @@ Non-retriable patterns are checked first. If an error matches a non-retriable pa
 - **Timer fires during active retry**: a `retryInProgress` guard prevents overlapping batches.
 - **Queue file corrupted**: JSON parse errors are caught; service starts with an empty queue and logs a warning.
 - **Queue overflow**: capped at 100 entries. Oldest entries are evicted when full.
-- **Atomic writes**: queue is written to a `.tmp` file first, then renamed, to prevent corruption on crashes.
+- **Atomic writes**: queue is written to a uniquely-named `.tmp` file first, then renamed, to prevent corruption on crashes or concurrent writes.
 
 ## Limitations
 
@@ -142,10 +147,8 @@ Non-retriable patterns are checked first. If an error matches a non-retriable pa
 
 Contributions are welcome. Please open an issue first to discuss what you would like to change.
 
-To work on the plugin:
-
 ```bash
-git clone https://github.com/cheapestinference/openclaw-plugin-retry-on-error
-cd openclaw-plugin-retry-on-error
+git clone https://github.com/cheapestinference/openclaw-plugin-ratelimit-retry
+cd openclaw-plugin-ratelimit-retry
 # No build step. OpenClaw loads .ts files directly via Jiti.
 ```

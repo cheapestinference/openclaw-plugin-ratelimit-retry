@@ -164,8 +164,8 @@ async function sendRetryMessage(
               minProtocol: 1,
               maxProtocol: 1,
               client: {
-                name: "retry-on-error",
-                displayName: "Retry on Error Plugin",
+                name: "ratelimit-retry",
+                displayName: "Ratelimit Retry Plugin",
                 version: "1.0.0",
                 mode: "backend",
               },
@@ -257,7 +257,7 @@ export function createRetryService(): {
     const attempts = existing ? existing.attempts + 1 : 0;
 
     if (attempts >= config.maxRetryAttempts) {
-      logger?.warn(`retry-on-error: max attempts (${config.maxRetryAttempts}) reached for ${sessionKey}, abandoning`);
+      logger?.warn(`ratelimit-retry: max attempts (${config.maxRetryAttempts}) reached for ${sessionKey}, abandoning`);
       queue = queue.filter((e) => e.sessionKey !== sessionKey);
       if (queuePath) saveQueue(queuePath, queue).catch(() => {});
       return;
@@ -292,10 +292,10 @@ export function createRetryService(): {
       const ready = queue.filter((e) => e.retryAfter <= now);
       if (ready.length === 0) return;
 
-      logger.info(`retry-on-error: ${ready.length} session(s) ready for retry`);
+      logger.info(`ratelimit-retry: ${ready.length} session(s) ready for retry`);
 
       for (const entry of ready) {
-        logger.info(`retry-on-error: retrying session ${entry.sessionKey} (attempt ${entry.attempts + 1})`);
+        logger.info(`ratelimit-retry: retrying session ${entry.sessionKey} (attempt ${entry.attempts + 1})`);
 
         const result = await sendRetryMessage(
           config.gatewayPort,
@@ -311,11 +311,11 @@ export function createRetryService(): {
           // Entry is removed when agent_end fires with success=true.
           // If the retry fails again, agent_end fires with error and increments attempts.
           entry.retryAfter = nextResetTime(new Date(), config.budgetWindowHours);
-          logger.info(`retry-on-error: sent retry to ${entry.sessionKey}`);
+          logger.info(`ratelimit-retry: sent retry to ${entry.sessionKey}`);
         } else {
           // Push retryAfter forward to avoid hammering a down gateway every tick
           entry.retryAfter = nextResetTime(new Date(), config.budgetWindowHours);
-          logger.warn(`retry-on-error: failed to send retry to ${entry.sessionKey}: ${result.error}`);
+          logger.warn(`ratelimit-retry: failed to send retry to ${entry.sessionKey}: ${result.error}`);
         }
       }
 
@@ -326,10 +326,10 @@ export function createRetryService(): {
   };
 
   const service: OpenClawPluginService = {
-    id: "retry-on-error",
+    id: "ratelimit-retry",
 
     async start(ctx) {
-      const stateDir = join(ctx.stateDir, "retry-on-error");
+      const stateDir = join(ctx.stateDir, "ratelimit-retry");
       queuePath = join(stateDir, "queue.json");
 
       config = {
@@ -346,18 +346,18 @@ export function createRetryService(): {
         const loadedKeys = new Set(loaded.map((e) => e.sessionKey));
         const preStartEntries = queue.filter((e) => !loadedKeys.has(e.sessionKey));
         queue = [...loaded, ...preStartEntries];
-        ctx.logger.info(`retry-on-error: loaded ${loaded.length} pending retry(s) from disk`);
+        ctx.logger.info(`ratelimit-retry: loaded ${loaded.length} pending retry(s) from disk`);
       }
 
       const intervalMs = config.checkIntervalMinutes * 60 * 1000;
       timer = setInterval(() => {
         processTick(ctx.logger).catch((err) => {
-          ctx.logger.error(`retry-on-error: tick failed: ${err}`);
+          ctx.logger.error(`ratelimit-retry: tick failed: ${err}`);
         });
       }, intervalMs);
 
       ctx.logger.info(
-        `retry-on-error: service started (window=${config.budgetWindowHours}h, check=${config.checkIntervalMinutes}min, maxAttempts=${config.maxRetryAttempts})`,
+        `ratelimit-retry: service started (window=${config.budgetWindowHours}h, check=${config.checkIntervalMinutes}min, maxAttempts=${config.maxRetryAttempts})`,
       );
     },
 
@@ -369,7 +369,7 @@ export function createRetryService(): {
       if (queuePath && queue.length > 0) {
         await saveQueue(queuePath, queue);
       }
-      ctx.logger.info("retry-on-error: service stopped");
+      ctx.logger.info("ratelimit-retry: service stopped");
     },
   };
 

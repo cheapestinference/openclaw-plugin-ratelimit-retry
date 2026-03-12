@@ -18,8 +18,8 @@ const DEFAULT_CONFIG: Required<PluginConfig> = {
 const { service, addEntry, removeEntry } = createRetryService();
 
 const plugin = {
-  id: "retry-on-error",
-  name: "Retry on Error",
+  id: "ratelimit-retry",
+  name: "Ratelimit Retry",
   description: "Automatically retry agent conversations that fail due to provider rate limits",
 
   register(api: OpenClawPluginApi) {
@@ -42,11 +42,11 @@ const plugin = {
 
       // Ignore non-retriable errors
       if (!isRetriableError(error)) {
-        api.logger.debug?.(`retry-on-error: non-retriable error on ${sessionKey}: ${error.slice(0, 100)}`);
+        api.logger.debug?.(`ratelimit-retry: non-retriable error on ${sessionKey}: ${error.slice(0, 100)}`);
         return;
       }
 
-      api.logger.info(`retry-on-error: queuing retry for ${sessionKey} (error: ${error.slice(0, 100)})`);
+      api.logger.info(`ratelimit-retry: queuing retry for ${sessionKey} (error: ${error.slice(0, 100)})`);
 
       const resolvedConfig = {
         ...cfg,
@@ -60,7 +60,7 @@ const plugin = {
 
     api.registerService(service);
 
-    api.logger.info("retry-on-error: plugin registered");
+    api.logger.info("ratelimit-retry: plugin registered");
   },
 };
 
