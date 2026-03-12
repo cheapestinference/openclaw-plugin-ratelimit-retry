@@ -15,7 +15,7 @@ const DEFAULT_CONFIG: Required<PluginConfig> = {
   retryMessage: "Continue where you left off. The previous attempt failed due to a rate limit that has now reset.",
 };
 
-const { service, addEntry } = createRetryService();
+const { service, addEntry, removeEntry } = createRetryService();
 
 const plugin = {
   id: "retry-on-error",
@@ -31,16 +31,20 @@ const plugin = {
     api.on("agent_end", (event, ctx) => {
       const error = (event as Record<string, unknown>).error as string | undefined;
       const success = (event as Record<string, unknown>).success as boolean | undefined;
+      const sessionKey = (ctx as Record<string, unknown>).sessionKey as string | undefined;
+      if (!sessionKey) return;
 
-      if (success || !error) return;
-
-      if (!isRetriableError(error)) {
-        api.logger.debug?.(`retry-on-error: non-retriable error on ${(ctx as any).sessionKey}: ${error.slice(0, 100)}`);
+      // On success, remove from retry queue (if present)
+      if (success || !error) {
+        removeEntry(sessionKey);
         return;
       }
 
-      const sessionKey = (ctx as Record<string, unknown>).sessionKey as string | undefined;
-      if (!sessionKey) return;
+      // Ignore non-retriable errors
+      if (!isRetriableError(error)) {
+        api.logger.debug?.(`retry-on-error: non-retriable error on ${sessionKey}: ${error.slice(0, 100)}`);
+        return;
+      }
 
       api.logger.info(`retry-on-error: queuing retry for ${sessionKey} (error: ${error.slice(0, 100)})`);
 

@@ -1,5 +1,5 @@
 import { writeFile, readFile, mkdir, rename } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import type { OpenClawPluginService } from "openclaw/plugin-sdk";
 
 // --- Types ---
@@ -25,7 +25,7 @@ interface RetryConfig {
 // --- Error Detection ---
 
 const RETRIABLE_PATTERNS = [
-  /429/i,
+  /\b429\b/i,
   /rate[_ ]?limit/i,
   /too many requests/i,
   /budget/i,
@@ -36,7 +36,7 @@ const RETRIABLE_PATTERNS = [
 ];
 
 const NON_RETRIABLE_PATTERNS = [
-  /40[1-3]/i,
+  /\b40[1-3]\b/i,
   /invalid api key/i,
   /unauthorized/i,
   /context[_ ]?(length|overflow)/i,
@@ -101,8 +101,7 @@ async function loadQueue(queuePath: string): Promise<QueueEntry[]> {
 }
 
 async function saveQueue(queuePath: string, queue: QueueEntry[]): Promise<void> {
-  const dir = queuePath.substring(0, queuePath.lastIndexOf("/"));
-  await mkdir(dir, { recursive: true });
+  await mkdir(dirname(queuePath), { recursive: true });
   const tmpPath = queuePath + ".tmp";
   await writeFile(tmpPath, JSON.stringify(queue, null, 2), "utf-8");
   await rename(tmpPath, queuePath);
@@ -132,7 +131,14 @@ async function sendRetryMessage(
   sessionKey: string,
   message: string,
 ): Promise<ChatSendResult> {
-  return new Promise((resolve) => {
+  return new Promise((outerResolve) => {
+    let settled = false;
+    const resolve = (val: ChatSendResult) => {
+      if (settled) return;
+      settled = true;
+      outerResolve(val);
+    };
+
     const timeout = setTimeout(() => {
       try { ws.close(); } catch {}
       resolve({ ok: false, error: "Connection timeout" });
@@ -148,6 +154,7 @@ async function sendRetryMessage(
 
     ws.addEventListener("close", () => {
       clearTimeout(timeout);
+      resolve({ ok: false, error: "Connection closed unexpectedly" });
     });
 
     ws.addEventListener("message", (event) => {
@@ -220,6 +227,7 @@ async function sendRetryMessage(
 export function createRetryService(): {
   service: OpenClawPluginService;
   addEntry: (sessionKey: string, errorMessage: string, config: RetryConfig) => void;
+  removeEntry: (sessionKey: string) => void;
 } {
   let queue: QueueEntry[] = [];
   let queuePath = "";
@@ -259,6 +267,14 @@ export function createRetryService(): {
     saveQueue(queuePath, queue).catch(() => {});
   };
 
+  const removeEntry = (sessionKey: string) => {
+    const existed = queue.some((e) => e.sessionKey === sessionKey);
+    if (existed) {
+      queue = queue.filter((e) => e.sessionKey !== sessionKey);
+      saveQueue(queuePath, queue).catch(() => {});
+    }
+  };
+
   const processTick = async (logger: { info: (msg: string) => void; warn: (msg: string) => void; error: (msg: string) => void }) => {
     if (retryInProgress || queue.length === 0) return;
     retryInProgress = true;
@@ -282,7 +298,11 @@ export function createRetryService(): {
         );
 
         if (result.ok) {
-          queue = queue.filter((e) => e.sessionKey !== entry.sessionKey);
+          // Don't remove — keep entry so attempts counter is preserved.
+          // Push retryAfter to next window to prevent re-sending on next tick.
+          // Entry is removed when agent_end fires with success=true.
+          // If the retry fails again, agent_end fires with error and increments attempts.
+          entry.retryAfter = nextResetTime(new Date(), config.budgetWindowHours);
           logger.info(`retry-on-error: sent retry to ${entry.sessionKey}`);
         } else {
           logger.warn(`retry-on-error: failed to send retry to ${entry.sessionKey}: ${result.error}`);
@@ -339,5 +359,5 @@ export function createRetryService(): {
     },
   };
 
-  return { service, addEntry };
+  return { service, addEntry, removeEntry };
 }
