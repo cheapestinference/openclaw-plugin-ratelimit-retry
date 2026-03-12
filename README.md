@@ -117,7 +117,7 @@ Non-retriable patterns are checked first. If an error matches a non-retriable pa
 - **Server restarts**: the queue is persisted to `{stateDir}/retry-on-error/queue.json` (typically `~/.openclaw/retry-on-error/queue.json`) and reloaded on startup.
 - **Same session errors multiple times**: deduplicated by `sessionKey`. The existing entry is updated with incremented attempts and a recalculated `retryAfter`.
 - **Retry fails with 429 again**: `agent_end` fires again, re-queuing with incremented attempts. Natural loop until success or `maxRetryAttempts`.
-- **Gateway unreachable during retry**: connection error is caught, entry stays in queue for the next tick.
+- **Gateway unreachable during retry**: connection error is caught, entry's `retryAfter` is pushed to the next budget window to avoid hammering a down gateway every tick.
 - **Max attempts exceeded**: entry is removed from queue and a warning is logged.
 - **Sub-agent sessions**: handled identically -- `sessionKey` format `agent:X:subagent:Y` works the same way.
 - **Timer fires during active retry**: a `retryInProgress` guard prevents overlapping batches.

@@ -36,7 +36,7 @@ const RETRIABLE_PATTERNS = [
 ];
 
 const NON_RETRIABLE_PATTERNS = [
-  /\b40[1-3]\b/i,
+  /\b40[1-4]\b/i,
   /invalid api key/i,
   /unauthorized/i,
   /context[_ ]?(length|overflow)/i,
@@ -190,6 +190,13 @@ async function sendRetryMessage(
           return;
         }
 
+        if (frame.type === "res" && frame.id === 1 && !frame.ok) {
+          clearTimeout(timeout);
+          resolve({ ok: false, error: frame.error?.message ?? "Gateway authentication failed" });
+          ws.close();
+          return;
+        }
+
         if (frame.type === "res" && frame.id === 1 && frame.ok) {
           const chatFrame = {
             type: "req",
@@ -224,9 +231,15 @@ async function sendRetryMessage(
 
 // --- Service ---
 
+interface Logger {
+  info: (msg: string) => void;
+  warn: (msg: string) => void;
+  error: (msg: string) => void;
+}
+
 export function createRetryService(): {
   service: OpenClawPluginService;
-  addEntry: (sessionKey: string, errorMessage: string, config: RetryConfig) => void;
+  addEntry: (sessionKey: string, errorMessage: string, config: RetryConfig, logger?: Logger) => void;
   removeEntry: (sessionKey: string) => void;
 } {
   let queue: QueueEntry[] = [];
@@ -243,15 +256,16 @@ export function createRetryService(): {
     gatewayPassword: undefined,
   };
 
-  const addEntry = (sessionKey: string, errorMessage: string, cfg: RetryConfig) => {
+  const addEntry = (sessionKey: string, errorMessage: string, cfg: RetryConfig, logger?: Logger) => {
     config = cfg;
     const now = new Date();
     const existing = queue.find((e) => e.sessionKey === sessionKey);
     const attempts = existing ? existing.attempts + 1 : 0;
 
     if (attempts >= config.maxRetryAttempts) {
+      logger?.warn(`retry-on-error: max attempts (${config.maxRetryAttempts}) reached for ${sessionKey}, abandoning`);
       queue = queue.filter((e) => e.sessionKey !== sessionKey);
-      saveQueue(queuePath, queue).catch(() => {});
+      if (queuePath) saveQueue(queuePath, queue).catch(() => {});
       return;
     }
 
@@ -264,18 +278,18 @@ export function createRetryService(): {
     };
 
     queue = addToQueue(queue, entry);
-    saveQueue(queuePath, queue).catch(() => {});
+    if (queuePath) saveQueue(queuePath, queue).catch(() => {});
   };
 
   const removeEntry = (sessionKey: string) => {
     const existed = queue.some((e) => e.sessionKey === sessionKey);
     if (existed) {
       queue = queue.filter((e) => e.sessionKey !== sessionKey);
-      saveQueue(queuePath, queue).catch(() => {});
+      if (queuePath) saveQueue(queuePath, queue).catch(() => {});
     }
   };
 
-  const processTick = async (logger: { info: (msg: string) => void; warn: (msg: string) => void; error: (msg: string) => void }) => {
+  const processTick = async (logger: Logger) => {
     if (retryInProgress || queue.length === 0) return;
     retryInProgress = true;
 
@@ -305,6 +319,8 @@ export function createRetryService(): {
           entry.retryAfter = nextResetTime(new Date(), config.budgetWindowHours);
           logger.info(`retry-on-error: sent retry to ${entry.sessionKey}`);
         } else {
+          // Push retryAfter forward to avoid hammering a down gateway every tick
+          entry.retryAfter = nextResetTime(new Date(), config.budgetWindowHours);
           logger.warn(`retry-on-error: failed to send retry to ${entry.sessionKey}: ${result.error}`);
         }
       }

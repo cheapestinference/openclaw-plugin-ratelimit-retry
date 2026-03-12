@@ -55,7 +55,7 @@ const plugin = {
         gatewayPassword: (api.config as Record<string, any>).gateway?.auth?.password,
       };
 
-      addEntry(sessionKey, error, resolvedConfig);
+      addEntry(sessionKey, error, resolvedConfig, api.logger as any);
     });
 
     api.registerService(service);
