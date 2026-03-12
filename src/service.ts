@@ -39,6 +39,7 @@ const NON_RETRIABLE_PATTERNS = [
   /\b40[1-4]\b/i,
   /invalid api key/i,
   /unauthorized/i,
+  /invalid request/i,
   /context[_ ]?(length|overflow)/i,
   /prompt too (large|long)/i,
   /model not found/i,
@@ -102,7 +103,7 @@ async function loadQueue(queuePath: string): Promise<QueueEntry[]> {
 
 async function saveQueue(queuePath: string, queue: QueueEntry[]): Promise<void> {
   await mkdir(dirname(queuePath), { recursive: true });
-  const tmpPath = queuePath + ".tmp";
+  const tmpPath = `${queuePath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
   await writeFile(tmpPath, JSON.stringify(queue, null, 2), "utf-8");
   await rename(tmpPath, queuePath);
 }
@@ -345,10 +346,14 @@ export function createRetryService(): {
         gatewayPassword: (ctx.config as Record<string, any>).gateway?.auth?.password,
       };
 
-      queue = await loadQueue(queuePath);
+      const loaded = await loadQueue(queuePath);
 
-      if (queue.length > 0) {
-        ctx.logger.info(`retry-on-error: loaded ${queue.length} pending retry(s) from disk`);
+      // Merge: disk entries + any in-memory entries added between register() and start()
+      if (loaded.length > 0) {
+        const loadedKeys = new Set(loaded.map((e) => e.sessionKey));
+        const preStartEntries = queue.filter((e) => !loadedKeys.has(e.sessionKey));
+        queue = [...loaded, ...preStartEntries];
+        ctx.logger.info(`retry-on-error: loaded ${loaded.length} pending retry(s) from disk`);
       }
 
       const intervalMs = config.checkIntervalMinutes * 60 * 1000;
