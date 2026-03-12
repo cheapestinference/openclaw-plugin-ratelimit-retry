@@ -1,0 +1,15 @@
+{
+  "name": "@openclaw/retry-on-error",
+  "version": "1.0.0",
+  "description": "Automatically retry agent conversations that fail due to provider rate limits",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cheapestinference/openclaw-plugin-retry-on-error"
+  },
+  "keywords": ["openclaw", "plugin", "retry", "rate-limit", "429"],
+  "openclaw": {
+    "extensions": ["./index.ts"]
+  }
+}

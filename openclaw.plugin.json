@@ -1,0 +1,29 @@
+{
+  "id": "retry-on-error",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "budgetWindowHours": {
+        "type": "number",
+        "default": 5,
+        "description": "Budget reset window in hours (aligned to UTC clock boundaries)"
+      },
+      "maxRetryAttempts": {
+        "type": "number",
+        "default": 3,
+        "description": "Maximum retry attempts per session before abandoning"
+      },
+      "checkIntervalMinutes": {
+        "type": "number",
+        "default": 5,
+        "description": "How often to check for pending retries (minutes)"
+      },
+      "retryMessage": {
+        "type": "string",
+        "default": "Continue where you left off. The previous attempt failed due to a rate limit that has now reset.",
+        "description": "Message sent to the session to resume the conversation"
+      }
+    }
+  }
+}
